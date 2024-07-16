@@ -45,7 +45,7 @@ from axolotl.prompt_tokenizers import LLAMA_DEFAULT_EOS_TOKEN
 from axolotl.utils.bench import log_gpu_memory_usage
 from axolotl.utils.chat_templates import chat_templates
 from axolotl.utils.dict import DictDefault
-from axolotl.utils.distributed import zero_only
+from axolotl.utils.distributed import zero_only, get_device
 from axolotl.utils.gradient_checkpointing import hf_grad_checkpoint_unsloth_wrapper
 from axolotl.utils.lora_embeddings import get_linear_embedding_layers
 from axolotl.utils.model_shard_quant import load_sharded_model, load_sharded_model_quant
@@ -297,6 +297,62 @@ def load_tokenizer(cfg):
     return tokenizer
 
 
+def set_model_device(
+    cfg: DictDefault,
+    max_memory,
+    model_config,
+    model_kwargs: Dict[str, Any],
+    device_map,
+):
+    device = get_device()
+    if max_memory is not None:
+        # Based on https://github.com/togethercomputer/OpenChatKit/blob/main/inference/bot.py
+        from accelerate import infer_auto_device_map
+
+        with init_empty_weights():
+            model_canvas = AutoModelForCausalLM.from_config(
+                model_config, trust_remote_code=cfg.trust_remote_code or False
+            )
+        model_canvas.tie_weights()
+        device_map = infer_auto_device_map(
+            model_canvas,
+            max_memory=max_memory,
+            dtype=cfg.torch_dtype,
+        )
+        # We can discard max_memory now as we have a device map set up for us
+        max_memory = None
+
+    model_kwargs["device_map"] = device_map
+    model_kwargs["torch_dtype"] = cfg.torch_dtype
+
+    if "mps" in device.__str__():
+        model_kwargs["device_map"] = "mps:0"
+    elif "npu" in device.__str__():
+        model_kwargs["device_map"] = "npu:0"
+
+    # TODO can we put the reference model on it's own gpu? I think we have to move logits around to calculate loss
+    # if cfg.rl:
+    #     if torch.cuda.device_count() > 1:
+    #         if reference_model:
+    #             model_kwargs["device_map"] = "cuda:" + str(
+    #                 torch.cuda.current_device() + 1
+    #             )
+    #         else:
+    #             model_kwargs["device_map"] = "cuda:" + str(torch.cuda.current_device())
+
+    if is_deepspeed_zero3_enabled():
+        del model_kwargs["device_map"]
+
+
+def get_device_count():
+    device = get_device()
+    if "cuda" in device.__str__():
+        return torch.cuda.device_count()
+    elif "npu" in device.__str__():
+        return torch.npu.device_count()
+    return 1
+
+
 def load_model(
     cfg: DictDefault,
     tokenizer: PreTrainedTokenizerBase,
@@ -440,41 +496,8 @@ def load_model(
             max_memory[i] = gpu_memory_limit
         max_memory["cpu"] = "256GiB"  # something sufficiently large to fit anything
 
-    if max_memory is not None:
-        # Based on https://github.com/togethercomputer/OpenChatKit/blob/main/inference/bot.py
-        from accelerate import infer_auto_device_map
-
-        with init_empty_weights():
-            model_canvas = AutoModelForCausalLM.from_config(
-                model_config, trust_remote_code=cfg.trust_remote_code or False
-            )
-        model_canvas.tie_weights()
-        device_map = infer_auto_device_map(
-            model_canvas,
-            max_memory=max_memory,
-            dtype=cfg.torch_dtype,
-        )
-        # We can discard max_memory now as we have a device map set up for us
-        max_memory = None
-
-    model_kwargs["device_map"] = device_map
+    set_model_device(cfg, max_memory, model_config, model_kwargs, device_map)
     model_kwargs["torch_dtype"] = cfg.torch_dtype
-
-    if torch.backends.mps.is_available():
-        model_kwargs["device_map"] = "mps:0"
-
-    # TODO can we put the reference model on it's own gpu? I think we have to move logits around to calculate loss
-    # if cfg.rl:
-    #     if torch.cuda.device_count() > 1:
-    #         if reference_model:
-    #             model_kwargs["device_map"] = "cuda:" + str(
-    #                 torch.cuda.current_device() + 1
-    #             )
-    #         else:
-    #             model_kwargs["device_map"] = "cuda:" + str(torch.cuda.current_device())
-
-    if is_deepspeed_zero3_enabled():
-        del model_kwargs["device_map"]
 
     if cfg.revision_of_model:
         model_kwargs["revision"] = cfg.revision_of_model
@@ -817,9 +840,10 @@ def load_model(
         and not skip_move_to_device
     ):
         # TODO revaldate this conditional
-        model.to(f"cuda:{cfg.local_rank}")
+        device = get_device().__str__()
+        model.to(f"{device}:{cfg.local_rank}")
 
-    if torch.cuda.device_count() > 1 and int(os.getenv("WORLD_SIZE", "1")) == 1:
+    if get_device_count() > 1 and int(os.getenv("WORLD_SIZE", "1")) == 1:
         setattr(model, "is_parallelizable", True)
         setattr(model, "model_parallel", True)
 
