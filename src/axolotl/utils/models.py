@@ -548,6 +548,12 @@ class ModelLoader:
             del self.model_kwargs["device_map"]
 
     def set_quantization_config(self) -> None:
+
+        if self.cfg.load_in_8bit and self.cfg.adapter is not None:
+            self.model_kwargs["load_in_8bit"] = True
+        if self.cfg.load_in_4bit and self.cfg.adapter is not None:
+            self.model_kwargs["load_in_4bit"] = True
+
         if self.cfg.gptq:
             if not hasattr(self.model_config, "quantization_config"):
                 LOG.warning(
@@ -581,7 +587,9 @@ class ModelLoader:
                 self.model_kwargs["quantization_config"] = BitsAndBytesConfig(
                     **self.model_config.quantization_config
                 )
-        elif self.cfg.adapter == "qlora" and self.cfg.load_in_4bit:
+        elif self.cfg.adapter == "qlora" and (
+            "load_in_4bit" in self.model_kwargs and self.model_kwargs["load_in_4bit"]
+        ):
             bnb_config = {
                 "load_in_4bit": True,
                 "llm_int8_threshold": 6.0,
@@ -604,7 +612,9 @@ class ModelLoader:
             self.model_kwargs["quantization_config"] = BitsAndBytesConfig(
                 **bnb_config,
             )
-        elif self.cfg.adapter == "lora" and self.cfg.load_in_8bit:
+        elif self.cfg.adapter == "lora" and (
+            "load_in_8bit" in self.model_kwargs and self.model_kwargs["load_in_8bit"]
+        ):
             bnb_config = {
                 "load_in_8bit": True,
             }
@@ -614,11 +624,6 @@ class ModelLoader:
             self.model_kwargs["quantization_config"] = BitsAndBytesConfig(
                 **bnb_config,
             )
-
-        if self.cfg.load_in_8bit and self.cfg.adapter is not None:
-            self.model_kwargs["load_in_8bit"] = True
-        if self.cfg.load_in_4bit and self.cfg.adapter is not None:
-            self.model_kwargs["load_in_4bit"] = True
 
         # no longer needed per https://github.com/huggingface/transformers/pull/26610
         if "quantization_config" in self.model_kwargs or self.cfg.gptq:
@@ -841,7 +846,6 @@ class ModelLoader:
                 ],
             )
 
-
     def prepare_model(self, qlora_fsdp) -> None:
         skip_prepare_model_for_kbit_training = False
         if self.cfg.model_config_type == "qwen" and self.cfg.adapter == "lora":
@@ -868,7 +872,16 @@ class ModelLoader:
         if (
             not skip_prepare_model_for_kbit_training
             and self.cfg.adapter in ["lora", "qlora"]
-            and (self.cfg.load_in_8bit or self.cfg.load_in_4bit)
+            and (
+                (
+                    "load_in_8bit" in self.model_kwargs
+                    and self.model_kwargs["load_in_8bit"]
+                )
+                or (
+                    "load_in_4bit" in self.model_kwargs
+                    and self.model_kwargs["load_in_4bit"]
+                )
+            )
         ):
             LOG.info("converting PEFT model w/ prepare_model_for_kbit_training")
             self.model = prepare_model_for_kbit_training(
@@ -974,7 +987,6 @@ class ModelLoader:
                 "converting modules to %s for flash attention", self.cfg.torch_dtype
             )
             self.convert_embedding_modules_dtype(
-                self.model,
                 embedding_modules,
                 dist_dtype=self.cfg.torch_dtype,
                 before_kbit_train_or_finetune=False,
@@ -996,7 +1008,9 @@ class ModelLoader:
                     self.model, self.cfg, inference=False, config_only=True
                 )
             else:
-                self.model, lora_config = load_adapter(self.model, self.cfg, self.cfg.adapter)
+                self.model, lora_config = load_adapter(
+                    self.model, self.cfg, self.cfg.adapter
+                )
 
         # ---------------------------------------------------------
         #  put model to accelerator
@@ -1034,7 +1048,7 @@ class ModelLoader:
         if self.cfg.adapter is not None:
             log_gpu_memory_usage(LOG, "after adapters", self.model.device)
 
-        self.apply_lora_patch(self.model)
+        self.apply_lora_patch()
 
         if "cuda" in self.device.__str__():
             for _ in range(3):
