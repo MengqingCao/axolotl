@@ -79,7 +79,7 @@ def gpu_memory_usage_smi(device=0):
 def log_gpu_memory_usage(log, msg, device):
     if torch.backends.mps.is_available():
         usage, cache, misc = mps_memory_usage_all()
-    elif "npu" in CURRENT_DEVICE.__str__():
+    elif "npu" in str(CURRENT_DEVICE):
         usage, cache, misc = npu_memory_usage_all(device)
     else:
         usage, cache, misc = gpu_memory_usage_all(device)
@@ -89,6 +89,7 @@ def log_gpu_memory_usage(log, msg, device):
     if misc > 0:
         extras.append(f"+{misc:.03f}GB misc")
     log.info(
-        f"{CURRENT_DEVICE.__str__()} memory usage {msg}: {usage:.03f}GB ({', '.join(extras)})", stacklevel=2
+        f"{str(CURRENT_DEVICE)} memory usage {msg}: {usage:.03f}GB ({', '.join(extras)})",
+        stacklevel=2,
     )
     return usage, cache, misc

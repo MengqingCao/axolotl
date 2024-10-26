@@ -102,20 +102,29 @@ def normalize_config(cfg):
         cfg.bf16 = False
     elif cfg.device.startswith("npu"):
         if cfg.load_in_8bit or cfg.load_in_4bit:
-            LOG.warning("Quantification is currently not supported in Ascend npu, disabling for this configuration.")
+            LOG.warning(
+                "Quantification is currently not supported in Ascend npu, disabling for this configuration."
+            )
             cfg.load_in_8bit = False
             cfg.load_in_4bit = False
 
         if cfg.tf32:
-            LOG.warning("tf32 dtype is currently not supported in Ascend npu, disabling for this configuration.")
+            LOG.warning(
+                "tf32 dtype is currently not supported in Ascend npu, disabling for this configuration."
+            )
             cfg.tf32 = False
 
         if cfg.flash_attention:
-            LOG.error("flash_attn is currently not supported in Ascend npu, disabling for this configuration.")
+            LOG.error(
+                "flash_attn is currently not supported in Ascend npu, disabling for this configuration."
+            )
             cfg.flash_attention = False
 
         if "bit" in cfg.optimizer:
-            LOG.error("{} is currently not supported in Ascend npu, choose another one.".format(cfg.optimizer))
+            LOG.error(
+                "%s is currently not supported in Ascend npu, choose another one.",
+                cfg.optimizer,
+            )
             raise NotImplementedError
 
     else:

@@ -9,11 +9,10 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 from accelerate import PartialState
-
 from transformers.utils.import_utils import (
-    is_torch_npu_available,
     is_torch_cuda_available,
-    is_torch_mps_available
+    is_torch_mps_available,
+    is_torch_npu_available,
 )
 
 distributed_state = None  # pylint: disable=invalid-name
@@ -29,7 +28,9 @@ def get_device():
         device = torch.device("npu")
     return device
 
+
 CURRENT_DEVICE = get_device()
+
 
 def is_distributed():
     """
@@ -108,9 +109,7 @@ def gather_scalar_from_all_ranks(fn, world_size=1):  # pylint: disable=invalid-n
     value_scalar = fn()
     if not is_distributed():
         return [value_scalar]
-    value_tensor = torch.tensor(
-        value_scalar, device=CURRENT_DEVICE
-    ).float()
+    value_tensor = torch.tensor(value_scalar, device=CURRENT_DEVICE).float()
 
     if not is_main_process():
         dist.gather(value_tensor, dst=0)
@@ -201,9 +200,7 @@ def gather_from_all_ranks(fn, world_size=1):  # pylint: disable=invalid-name
     - A list of computed values from all ranks if on the gathering rank, otherwise None.
     """
     value_scalar = fn()
-    value_tensor = torch.tensor(
-        value_scalar, device=CURRENT_DEVICE
-    ).float()
+    value_tensor = torch.tensor(value_scalar, device=CURRENT_DEVICE).float()
 
     # Placeholder tensor for gathering results
     if is_main_process():
