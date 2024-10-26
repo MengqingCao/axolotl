@@ -52,7 +52,7 @@ from axolotl.prompt_tokenizers import LLAMA_DEFAULT_EOS_TOKEN
 from axolotl.utils.bench import log_gpu_memory_usage
 from axolotl.utils.chat_templates import chat_templates
 from axolotl.utils.dict import DictDefault
-from axolotl.utils.distributed import zero_only
+from axolotl.utils.distributed import zero_only, CURRENT_DEVICE
 from axolotl.utils.gradient_checkpointing import hf_grad_checkpoint_unsloth_wrapper
 from axolotl.utils.lora_embeddings import get_linear_embedding_layers
 from axolotl.utils.model_shard_quant import load_sharded_model, load_sharded_model_quant
@@ -324,6 +324,13 @@ def load_processor(cfg: DictDefault, tokenizer: PreTrainedTokenizerBase):
     return processor
 
 
+def get_device_count():
+    if "cuda" in CURRENT_DEVICE.__str__():
+        return torch.cuda.device_count()
+    elif "npu" in CURRENT_DEVICE.__str__():
+        return torch.npu.device_count()
+    return 1
+
 class ModelLoader:
     """
     ModelLoader: managing all the config and monkey patches while loading model
@@ -556,7 +563,8 @@ class ModelLoader:
             )
 
             max_memory = {}
-            for i in range(torch.cuda.device_count()):
+            num_device = get_device_count()
+            for i in range(num_device):
                 max_memory[i] = gpu_memory_limit
             max_memory["cpu"] = "256GiB"  # something sufficiently large to fit anything
 
@@ -583,6 +591,8 @@ class ModelLoader:
 
         if torch.backends.mps.is_available():
             self.model_kwargs["device_map"] = "mps:0"
+        elif "npu" in CURRENT_DEVICE.__str__():
+            self.model_kwargs["device_map"] = "npu:0"
 
         # TODO can we put the reference model on it's own gpu? I think we have to move logits around to calculate loss
         # if cfg.rl:
@@ -1010,7 +1020,7 @@ class ModelLoader:
         self.ajust_model_config()
 
         # log device memory usage
-        if hasattr(self.model, "device") and self.model.device.type in ("cuda", "mps"):
+        if hasattr(self.model, "device") and self.model.device.type in ("cuda", "mps", "npu"):
             log_gpu_memory_usage(LOG, "after model load", self.model.device)
 
         # make sure these are fp32 per Ramesh et al. (2021)
@@ -1084,9 +1094,10 @@ class ModelLoader:
             and not skip_move_to_device
         ):
             # TODO revaldate this conditional
-            self.model.to(f"cuda:{self.cfg.local_rank}")
+            print(120*"*", f"{CURRENT_DEVICE.__str__()}:{self.cfg.local_rank}")
+            self.model.to(f"{CURRENT_DEVICE.__str__()}:{self.cfg.local_rank}")
 
-        if torch.cuda.device_count() > 1 and int(os.getenv("WORLD_SIZE", "1")) == 1:
+        if get_device_count() > 1 and int(os.getenv("WORLD_SIZE", "1")) == 1:
             setattr(self.model, "is_parallelizable", True)
             setattr(self.model, "model_parallel", True)
 
