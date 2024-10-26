@@ -1094,7 +1094,6 @@ class ModelLoader:
             and not skip_move_to_device
         ):
             # TODO revaldate this conditional
-            print(120*"*", f"{CURRENT_DEVICE.__str__()}:{self.cfg.local_rank}")
             self.model.to(f"{CURRENT_DEVICE.__str__()}:{self.cfg.local_rank}")
 
         if get_device_count() > 1 and int(os.getenv("WORLD_SIZE", "1")) == 1:
