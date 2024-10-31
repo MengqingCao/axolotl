@@ -55,7 +55,7 @@ from axolotl.prompt_tokenizers import LLAMA_DEFAULT_EOS_TOKEN
 from axolotl.utils.bench import log_gpu_memory_usage
 from axolotl.utils.chat_templates import get_chat_template_from_config
 from axolotl.utils.dict import DictDefault
-from axolotl.utils.distributed import CURRENT_DEVICE, zero_only
+from axolotl.utils.distributed import get_device, zero_only
 from axolotl.utils.gradient_checkpointing import hf_grad_checkpoint_unsloth_wrapper
 from axolotl.utils.lora_embeddings import get_linear_embedding_layers
 from axolotl.utils.model_shard_quant import load_sharded_model, load_sharded_model_quant
@@ -331,9 +331,10 @@ def load_processor(cfg: DictDefault, tokenizer: PreTrainedTokenizerBase):
 
 
 def get_device_count():
-    if "cuda" in str(CURRENT_DEVICE):
+    cur_device = get_device()
+    if "cuda" in str(cur_device):
         return torch.cuda.device_count()
-    if "npu" in str(CURRENT_DEVICE):
+    if "npu" in str(cur_device):
         return torch.npu.device_count()
     return 1
 
@@ -596,9 +597,10 @@ class ModelLoader:
         self.model_kwargs["device_map"] = device_map
         self.model_kwargs["torch_dtype"] = self.cfg.torch_dtype
 
-        if torch.backends.mps.is_available():
+        cur_device = get_device()
+        if "mps" in str(cur_device):
             self.model_kwargs["device_map"] = "mps:0"
-        elif "npu" in str(CURRENT_DEVICE):
+        elif "npu" in str(cur_device):
             self.model_kwargs["device_map"] = "npu:0"
 
         # TODO can we put the reference model on it's own gpu? I think we have to move logits around to calculate loss
@@ -1144,7 +1146,7 @@ class ModelLoader:
             and not skip_move_to_device
         ):
             # TODO revaldate this conditional
-            self.model.to(f"{str(CURRENT_DEVICE)}:{self.cfg.local_rank}")
+            self.model.to(f"{str(get_device())}:{self.cfg.local_rank}")
 
         if get_device_count() > 1 and int(os.getenv("WORLD_SIZE", "1")) == 1:
             setattr(self.model, "is_parallelizable", True)

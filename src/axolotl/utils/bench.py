@@ -5,7 +5,7 @@ import pynvml
 import torch
 from pynvml.nvml import NVMLError
 
-from axolotl.utils.distributed import CURRENT_DEVICE
+from axolotl.utils.distributed import get_device
 
 
 def check_cuda_device(default_value):
@@ -77,9 +77,10 @@ def gpu_memory_usage_smi(device=0):
 
 
 def log_gpu_memory_usage(log, msg, device):
+    cur_device = get_device()
     if torch.backends.mps.is_available():
         usage, cache, misc = mps_memory_usage_all()
-    elif "npu" in str(CURRENT_DEVICE):
+    elif "npu" in str(cur_device):
         usage, cache, misc = npu_memory_usage_all(device)
     else:
         usage, cache, misc = gpu_memory_usage_all(device)
@@ -89,7 +90,7 @@ def log_gpu_memory_usage(log, msg, device):
     if misc > 0:
         extras.append(f"+{misc:.03f}GB misc")
     log.info(
-        f"{str(CURRENT_DEVICE)} memory usage {msg}: {usage:.03f}GB ({', '.join(extras)})",
+        f"{str(cur_device)} memory usage {msg}: {usage:.03f}GB ({', '.join(extras)})",
         stacklevel=2,
     )
     return usage, cache, misc

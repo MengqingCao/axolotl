@@ -29,9 +29,6 @@ def get_device():
     return device
 
 
-CURRENT_DEVICE = get_device()
-
-
 def is_distributed():
     """
     Check if distributed training is initialized.
@@ -109,7 +106,7 @@ def gather_scalar_from_all_ranks(fn, world_size=1):  # pylint: disable=invalid-n
     value_scalar = fn()
     if not is_distributed():
         return [value_scalar]
-    value_tensor = torch.tensor(value_scalar, device=CURRENT_DEVICE).float()
+    value_tensor = torch.tensor(value_scalar, device=get_device()).float()
 
     if not is_main_process():
         dist.gather(value_tensor, dst=0)
@@ -132,13 +129,14 @@ def broadcast_dict(vals: dict):
     if not is_distributed():
         return vals
 
+    cur_device = get_device()
     if is_main_process():
         data_byte = pickle.dumps(vals)
-        data_tensor = torch.ByteTensor(list(data_byte)).to(CURRENT_DEVICE)
-        data_size = torch.IntTensor([len(data_byte)]).to(CURRENT_DEVICE)
+        data_tensor = torch.ByteTensor(list(data_byte)).to(cur_device)
+        data_size = torch.IntTensor([len(data_byte)]).to(cur_device)
     else:
-        data_tensor = torch.empty([1024], dtype=torch.uint8, device=CURRENT_DEVICE)
-        data_size = torch.IntTensor([0]).to(CURRENT_DEVICE)
+        data_tensor = torch.empty([1024], dtype=torch.uint8, device=cur_device)
+        data_size = torch.IntTensor([0]).to(cur_device)
 
     dist.broadcast(data_size, 0)
     if not is_main_process():
@@ -167,14 +165,15 @@ def compute_and_broadcast(fn):  # pylint: disable=invalid-name
     Returns:
     - The computed value (int or float).
     """
+    cur_device = get_device()
     if is_main_process():
         value_scalar = fn()
         value_tensor = torch.tensor(
-            value_scalar, device=CURRENT_DEVICE, dtype=torch.float32
+            value_scalar, device=cur_device, dtype=torch.float32
         )
     else:
         value_tensor = torch.tensor(
-            0.0, device=CURRENT_DEVICE, dtype=torch.float32
+            0.0, device=cur_device, dtype=torch.float32
         )  # Placeholder tensor
 
     # Broadcast the tensor to all processes.
@@ -200,7 +199,7 @@ def gather_from_all_ranks(fn, world_size=1):  # pylint: disable=invalid-name
     - A list of computed values from all ranks if on the gathering rank, otherwise None.
     """
     value_scalar = fn()
-    value_tensor = torch.tensor(value_scalar, device=CURRENT_DEVICE).float()
+    value_tensor = torch.tensor(value_scalar, device=get_device()).float()
 
     # Placeholder tensor for gathering results
     if is_main_process():
